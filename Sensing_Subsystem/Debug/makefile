@@ -64,8 +64,8 @@ all: main-build
 main-build: Sensing_Subsystem.elf secondary-outputs
 
 # Tool invocations
-Sensing_Subsystem.elf Sensing_Subsystem.map: $(OBJS) $(USER_OBJS) C:\Users\owner\Documents\OneDrive\ -\ University\ of\ Cape\ Town\xul\2026\First\EE4113F\Sensing\ subsystem\Sensing\ Code\Sensing_Subsystem\STM32L4R5ZITXP_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "Sensing_Subsystem.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\owner\Documents\OneDrive - University of Cape Town\xul\2026\First\EE4113F\Sensing subsystem\Sensing Code\Sensing_Subsystem\STM32L4R5ZITXP_FLASH.ld" --specs=nosys.specs -Wl,-Map="Sensing_Subsystem.map" -Wl,--gc-sections -static -u _printf_float --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+Sensing_Subsystem.elf Sensing_Subsystem.map: $(OBJS) $(USER_OBJS) C:\Users\owner\Documents\OneDrive\ -\ University\ of\ Cape\ Town\xul\2026\First\EE4113F\Sensing\ subsystem\Sensing\ Code\wave-sensing-subsystem\Sensing_Subsystem\STM32L4R5ZITXP_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "Sensing_Subsystem.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\owner\Documents\OneDrive - University of Cape Town\xul\2026\First\EE4113F\Sensing subsystem\Sensing Code\wave-sensing-subsystem\Sensing_Subsystem\STM32L4R5ZITXP_FLASH.ld" --specs=nosys.specs -Wl,-Map="Sensing_Subsystem.map" -Wl,--gc-sections -static -u _printf_float --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

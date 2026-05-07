@@ -3,10 +3,10 @@
 ../Core/Src/imu.c:111:13:dbg	1
 ../Core/Src/imu.c:135:13:IMU_EnableBypass	1
 ../Core/Src/imu.c:147:13:filter_update	2
-../Core/Src/imu.c:179:14:read_magnetometer	2
-../Core/Src/imu.c:213:9:IMU_Init	3
-../Core/Src/imu.c:264:9:IMU_Calibrate	3
-../Core/Src/imu.c:306:6:IMU_Sleep	1
-../Core/Src/imu.c:318:6:IMU_Wake	1
-../Core/Src/imu.c:337:6:IMU_Tick	7
-../Core/Src/imu.c:402:6:IMU_ClearBatch	1
+../Core/Src/imu.c:166:14:read_magnetometer	2
+../Core/Src/imu.c:200:9:IMU_Init	3
+../Core/Src/imu.c:245:9:IMU_Calibrate	3
+../Core/Src/imu.c:287:6:IMU_Sleep	1
+../Core/Src/imu.c:299:6:IMU_Wake	1
+../Core/Src/imu.c:318:6:IMU_Tick	7
+../Core/Src/imu.c:383:6:IMU_ClearBatch	1
