@@ -1,0 +1,10 @@
+../Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_sd_ex.c:84:10:HAL_SDEx_HighSpeed	1
+../Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_sd_ex.c:94:13:HAL_SDEx_DriveTransceiver_1_8V_Callback	1
+../Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_sd_ex.c:131:19:HAL_SDEx_ConfigDMAMultiBuffer	2
+../Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_sd_ex.c:156:19:HAL_SDEx_ReadBlocksDMAMultiBuffer	8
+../Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_sd_ex.c:239:19:HAL_SDEx_WriteBlocksDMAMultiBuffer	8
+../Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_sd_ex.c:322:19:HAL_SDEx_ChangeDMABuffer	2
+../Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_sd_ex.c:344:13:HAL_SDEx_Read_DMADoubleBuffer0CpltCallback	1
+../Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_sd_ex.c:359:13:HAL_SDEx_Read_DMADoubleBuffer1CpltCallback	1
+../Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_sd_ex.c:374:13:HAL_SDEx_Write_DMADoubleBuffer0CpltCallback	1
+../Drivers/STM32L4xx_HAL_Driver/Src/stm32l4xx_hal_sd_ex.c:389:13:HAL_SDEx_Write_DMADoubleBuffer1CpltCallback	1

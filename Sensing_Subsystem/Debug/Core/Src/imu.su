@@ -1,0 +1,12 @@
+../Core/Src/imu.c:99:13:i2c_write	32	static
+../Core/Src/imu.c:105:13:i2c_read	40	static
+../Core/Src/imu.c:111:13:dbg	16	static
+../Core/Src/imu.c:135:13:IMU_EnableBypass	8	static
+../Core/Src/imu.c:147:13:filter_update	48	static
+../Core/Src/imu.c:179:14:read_magnetometer	40	static
+../Core/Src/imu.c:213:9:IMU_Init	16	static
+../Core/Src/imu.c:264:9:IMU_Calibrate	280	static
+../Core/Src/imu.c:306:6:IMU_Sleep	8	static
+../Core/Src/imu.c:318:6:IMU_Wake	8	static
+../Core/Src/imu.c:337:6:IMU_Tick	408	static
+../Core/Src/imu.c:402:6:IMU_ClearBatch	4	static
