@@ -253,7 +253,7 @@ void GPS_ClearBatch(void)
 
 /* =============================================================================
  * GPS_Sleep - power down GPS module
- * AT6558 datasheet: no specific sleep command via NMEA.
+ * No specific sleep mode
  * We just stop sampling. Module stays on but draws less power when idle.
  * =============================================================================
  */
