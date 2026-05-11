@@ -108,83 +108,105 @@ int main(void)
 
   /* USER CODE BEGIN SysInit */
 
-  // Initialize GPIO, UART, and I2C
-  MX_GPIO_Init();
-  MX_LPUART1_UART_Init();
-  MX_I2C1_Init();
+    // Initialize GPIO, UART, and I2C
+    MX_GPIO_Init();
+    MX_LPUART1_UART_Init();
+    MX_I2C1_Init();
 
-  // Helper function to print messages
-  void print_msg(const char* msg) {
-    HAL_UART_Transmit(&hlpuart1, (uint8_t*)msg, strlen(msg), 1000);
-  }
-
-  print_msg("\r\n========================================\r\n");
-  print_msg("  IMU TEST - GY-87 Module\r\n");
-  print_msg("========================================\r\n");
-
-  // Test I2C bus - scan for devices
-  print_msg("[TEST] Scanning I2C bus...\r\n");
-  uint8_t found_devices = 0;
-  for(uint8_t addr = 1; addr < 128; addr++) {
-    if(HAL_I2C_IsDeviceReady(&hi2c1, addr << 1, 1, 10) == HAL_OK) {
-      char buf[50];
-      sprintf(buf, "[TEST] Found device at address 0x%02X\r\n", addr);
-      print_msg(buf);
-      found_devices++;
+    // Helper function to print messages
+    void print_msg(const char* msg) {
+      HAL_UART_Transmit(&hlpuart1, (uint8_t*)msg, strlen(msg), 1000);
     }
-  }
 
-  if(found_devices == 0) {
-    print_msg("[ERROR] No I2C devices found! Check wiring.\r\n");
-    while(1) {
-      GPIOB->BSRR = GPIO_PIN_14;  // Red LED ON (error)
-      for(volatile uint32_t i=0; i<500000; i++);
-      GPIOB->BSRR = GPIO_PIN_14 << 16;  // Red LED OFF
-      for(volatile uint32_t i=0; i<500000; i++);
-    }
-  }
+    print_msg("\r\n========================================\r\n");
+    print_msg("  IMU SENSOR DATA TEST\r\n");
+    print_msg("========================================\r\n\r\n");
 
-  char found_msg[50];
-  sprintf(found_msg, "[TEST] Found %d I2C device(s)\r\n\r\n", found_devices);
-  print_msg(found_msg);
+    uint8_t mpu_addr = 0x68 << 1;  // MPU6050 address - DECLARE IT HERE FIRST
+    uint8_t data;
 
-  // Expected devices:
-  // 0x68 or 0x69 = MPU6050 (accelerometer + gyroscope)
-  // 0x1E = HMC5883L (magnetometer)
+    // Wake up MPU6050 (it starts in sleep mode)
+    print_msg("[INIT] Waking up MPU6050...\r\n");
+    data = 0x00;
+    HAL_I2C_Mem_Write(&hi2c1, mpu_addr, 0x6B, 1, &data, 1, 100);
+    HAL_Delay(100);
 
-  print_msg("[TEST] Attempting to read MPU6050 WHO_AM_I...\r\n");
-  uint8_t mpu_addr = 0x68 << 1;  // MPU6050 default address
-  uint8_t who_am_i_reg = 0x75;
-  uint8_t who_am_i_val = 0;
+    // Enable I2C bypass to access magnetometer
+    print_msg("[INIT] Enabling I2C bypass for magnetometer...\r\n");
+    data = 0x02;
+    HAL_I2C_Mem_Write(&hi2c1, mpu_addr, 0x37, 1, &data, 1, 100);
+    HAL_Delay(100);
 
-  if(HAL_I2C_Mem_Read(&hi2c1, mpu_addr, who_am_i_reg, 1, &who_am_i_val, 1, 100) == HAL_OK) {
-    char buf[60];
-    sprintf(buf, "[SUCCESS] MPU6050 WHO_AM_I = 0x%02X (expected 0x68)\r\n", who_am_i_val);
-    print_msg(buf);
-
-    if(who_am_i_val == 0x68) {
-      print_msg("[SUCCESS] MPU6050 responding correctly!\r\n");
-      GPIOC->BSRR = GPIO_PIN_7;  // Green LED ON = success
+    // Check if magnetometer is now visible
+    print_msg("[INIT] Scanning for magnetometer...\r\n");
+    uint8_t mag_addr = 0x1E << 1;
+    if(HAL_I2C_IsDeviceReady(&hi2c1, mag_addr, 1, 100) == HAL_OK) {
+      print_msg("[SUCCESS] Magnetometer (HMC5883L) found at 0x1E!\r\n");
     } else {
-      print_msg("[WARNING] Unexpected WHO_AM_I value\r\n");
+      print_msg("[WARNING] Magnetometer not found (this is OK for now)\r\n");
     }
-  } else {
-    print_msg("[ERROR] Failed to read MPU6050\r\n");
-  }
 
-  print_msg("\r\n========================================\r\n");
-  print_msg("IMU Test Complete. Check results above.\r\n");
-  print_msg("========================================\r\n\r\n");
+    // Initialize magnetometer
+    data = 0x70;
+    HAL_I2C_Mem_Write(&hi2c1, mag_addr, 0x00, 1, &data, 1, 100);
+    data = 0xA0;
+    HAL_I2C_Mem_Write(&hi2c1, mag_addr, 0x01, 1, &data, 1, 100);
+    data = 0x00;
+    HAL_I2C_Mem_Write(&hi2c1, mag_addr, 0x02, 1, &data, 1, 100);
 
-  // Blink blue LED to show test is done
-  while(1) {
-    GPIOB->BSRR = GPIO_PIN_7;  // Blue LED ON
-    for(volatile uint32_t i=0; i<2000000; i++);
-    GPIOB->BSRR = GPIO_PIN_7 << 16;  // Blue LED OFF
-    for(volatile uint32_t i=0; i<2000000; i++);
-  }
+    print_msg("\r\n[INIT] Initialization complete!\r\n");
+    print_msg("========================================\r\n");
+    print_msg("  STREAMING SENSOR DATA\r\n");
+    print_msg("========================================\r\n\r\n");
 
-  /* USER CODE END SysInit */
+    GPIOC->BSRR = GPIO_PIN_7;  // Green LED ON
+
+    // Continuous sensor reading loop
+    while(1)
+    {
+      GPIOB->BSRR = GPIO_PIN_7;  // Blue LED ON
+
+      // Read accelerometer
+      uint8_t accel_data[6];
+      HAL_I2C_Mem_Read(&hi2c1, mpu_addr, 0x3B, 1, accel_data, 6, 100);
+      int16_t ax_raw = (int16_t)(accel_data[0] << 8 | accel_data[1]);
+      int16_t ay_raw = (int16_t)(accel_data[2] << 8 | accel_data[3]);
+      int16_t az_raw = (int16_t)(accel_data[4] << 8 | accel_data[5]);
+      float ax = ax_raw / 16384.0f;
+      float ay = ay_raw / 16384.0f;
+      float az = az_raw / 16384.0f;
+
+      // Read gyroscope
+      uint8_t gyro_data[6];
+      HAL_I2C_Mem_Read(&hi2c1, mpu_addr, 0x43, 1, gyro_data, 6, 100);
+      int16_t gx_raw = (int16_t)(gyro_data[0] << 8 | gyro_data[1]);
+      int16_t gy_raw = (int16_t)(gyro_data[2] << 8 | gyro_data[3]);
+      int16_t gz_raw = (int16_t)(gyro_data[4] << 8 | gyro_data[5]);
+      float gx = gx_raw / 131.0f;
+      float gy = gy_raw / 131.0f;
+      float gz = gz_raw / 131.0f;
+
+      // Read magnetometer
+      uint8_t mag_data[6];
+      int16_t mx_raw = 0, my_raw = 0, mz_raw = 0;
+      if(HAL_I2C_Mem_Read(&hi2c1, mag_addr, 0x03, 1, mag_data, 6, 100) == HAL_OK) {
+        mx_raw = (int16_t)(mag_data[0] << 8 | mag_data[1]);
+        mz_raw = (int16_t)(mag_data[2] << 8 | mag_data[3]);
+        my_raw = (int16_t)(mag_data[4] << 8 | mag_data[5]);
+      }
+
+      // Print all sensor data
+      char buf[200];
+      sprintf(buf, "Accel: X=%+.2fg Y=%+.2fg Z=%+.2fg | Gyro: X=%+6.1f Y=%+6.1f Z=%+6.1f °/s | Mag: X=%+5d Y=%+5d Z=%+5d\r\n",
+              ax, ay, az, gx, gy, gz, mx_raw, my_raw, mz_raw);
+      print_msg(buf);
+
+      GPIOB->BSRR = GPIO_PIN_7 << 16;  // Blue LED OFF
+
+      HAL_Delay(500);
+    }
+
+    /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
