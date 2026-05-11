@@ -224,15 +224,17 @@ uint8_t IMU_Init(void)
     HAL_Delay(10);
 
     /* Verify HMC5883L is now visible (ID register 0x0A returns 'H' = 0x48) */
-    uint8_t hid = 0;
-    i2c_read(HMC_ADDR, 0x0A, &hid, 1);
-    if (hid != 0x48)
-    {
-        dbg("[IMU] ERROR: HMC5883L not found. Bypass may not have worked.\r\n");
-        return 0;
-    }
-    dbg("[IMU] HMC5883L OK\r\n");
-    dbg("[IMU] Ready. 100Hz | +-2g | +-250dps\r\n");
+        uint8_t hid = 0;
+        i2c_read(HMC_ADDR, 0x0A, &hid, 1);
+        if (hid != 0x48)
+        {
+            dbg("[IMU] WARNING: HMC5883L not found. Continuing with accel+gyro only.\r\n");
+            // Magnetometer will return zeros, but system continues
+        }
+        else
+        {
+            dbg("[IMU] HMC5883L OK\r\n");
+        }
 
     return 1;
 }

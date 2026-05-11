@@ -25,10 +25,13 @@
 #include "usb_otg.h"
 #include "gpio.h"
 
+
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdio.h>
+#include "imu.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -108,7 +111,7 @@ int main(void)
 
   /* USER CODE BEGIN SysInit */
 
-    // Initialize GPIO, UART, and I2C
+    // Initialize peripherals
     MX_GPIO_Init();
     MX_LPUART1_UART_Init();
     MX_I2C1_Init();
@@ -118,92 +121,127 @@ int main(void)
       HAL_UART_Transmit(&hlpuart1, (uint8_t*)msg, strlen(msg), 1000);
     }
 
+    // Print startup banner
     print_msg("\r\n========================================\r\n");
-    print_msg("  IMU SENSOR DATA TEST\r\n");
-    print_msg("========================================\r\n\r\n");
+    print_msg("  EEE4113F Group 23 — Wave Direction\r\n");
+    print_msg("=========================================\r\n");
 
-    uint8_t mpu_addr = 0x68 << 1;  // MPU6050 address - DECLARE IT HERE FIRST
-    uint8_t data;
+    char cfg[200];
+    snprintf(cfg, sizeof(cfg),
+        "  Sample rate : %d Hz\r\n"
+        "  Session     : %d min  (%lu samples)\r\n"
+        "  Interval    : %d hours\r\n"
+        "  Batch write : every %d samples\r\n"
+        "=========================================\r\n",
+        IMU_SAMPLE_RATE_HZ,
+        IMU_SESSION_DURATION_MIN,
+        (unsigned long)IMU_SAMPLES_PER_SESSION,
+        IMU_SESSION_INTERVAL_HOURS,
+        IMU_BATCH_SIZE);
+    print_msg(cfg);
 
-    // Wake up MPU6050 (it starts in sleep mode)
-    print_msg("[INIT] Waking up MPU6050...\r\n");
-    data = 0x00;
-    HAL_I2C_Mem_Write(&hi2c1, mpu_addr, 0x6B, 1, &data, 1, 100);
-    HAL_Delay(100);
+    /* ── ONE-TIME STARTUP INITIALISATION ───────────────────────────────── */
 
-    // Enable I2C bypass to access magnetometer
-    print_msg("[INIT] Enabling I2C bypass for magnetometer...\r\n");
-    data = 0x02;
-    HAL_I2C_Mem_Write(&hi2c1, mpu_addr, 0x37, 1, &data, 1, 100);
-    HAL_Delay(100);
-
-    // Check if magnetometer is now visible
-    print_msg("[INIT] Scanning for magnetometer...\r\n");
-    uint8_t mag_addr = 0x1E << 1;
-    if(HAL_I2C_IsDeviceReady(&hi2c1, mag_addr, 1, 100) == HAL_OK) {
-      print_msg("[SUCCESS] Magnetometer (HMC5883L) found at 0x1E!\r\n");
-    } else {
-      print_msg("[WARNING] Magnetometer not found (this is OK for now)\r\n");
+    // Initialize IMU module
+    print_msg("[MAIN] Initialising IMU...\r\n");
+    if (!IMU_Init())
+    {
+        print_msg("[MAIN] IMU init FAILED. Halting.\r\n");
+        while(1) {
+          GPIOB->BSRR = GPIO_PIN_14;  // Red LED blink = error
+          HAL_Delay(200);
+          GPIOB->BSRR = GPIO_PIN_14 << 16;
+          HAL_Delay(200);
+        }
     }
 
-    // Initialize magnetometer
-    data = 0x70;
-    HAL_I2C_Mem_Write(&hi2c1, mag_addr, 0x00, 1, &data, 1, 100);
-    data = 0xA0;
-    HAL_I2C_Mem_Write(&hi2c1, mag_addr, 0x01, 1, &data, 1, 100);
-    data = 0x00;
-    HAL_I2C_Mem_Write(&hi2c1, mag_addr, 0x02, 1, &data, 1, 100);
+    // Calibrate IMU (sensor must be still and flat for 5 seconds)
+    print_msg("[MAIN] Calibrating IMU (5 sec - keep still)...\r\n");
+    if (!IMU_Calibrate())
+    {
+        print_msg("[MAIN] IMU calibration FAILED. Halting.\r\n");
+        while(1) {
+          GPIOB->BSRR = GPIO_PIN_14;  // Red LED blink = error
+          HAL_Delay(200);
+          GPIOB->BSRR = GPIO_PIN_14 << 16;
+          HAL_Delay(200);
+        }
+    }
 
-    print_msg("\r\n[INIT] Initialization complete!\r\n");
-    print_msg("========================================\r\n");
-    print_msg("  STREAMING SENSOR DATA\r\n");
-    print_msg("========================================\r\n\r\n");
+    print_msg("[MAIN] All modules ready. Starting session loop.\r\n\r\n");
 
-    GPIOC->BSRR = GPIO_PIN_7;  // Green LED ON
+    GPIOC->BSRR = GPIO_PIN_7;  // Green LED ON = initialization complete
 
-    // Continuous sensor reading loop
+    /* ── DAILY SESSION LOOP ──────────────────────────────────────────── */
+
+    uint16_t session_number = 0;
+
     while(1)
     {
-      GPIOB->BSRR = GPIO_PIN_7;  // Blue LED ON
+      /* ── START SESSION ───────────────────────────────────────────────── */
+      session_number++;
+      char sess_msg[80];
+      snprintf(sess_msg, sizeof(sess_msg),
+          "[MAIN] Session %u starting (%d min @ %d Hz)\r\n",
+          session_number, IMU_SESSION_DURATION_MIN, IMU_SAMPLE_RATE_HZ);
+      print_msg(sess_msg);
 
-      // Read accelerometer
-      uint8_t accel_data[6];
-      HAL_I2C_Mem_Read(&hi2c1, mpu_addr, 0x3B, 1, accel_data, 6, 100);
-      int16_t ax_raw = (int16_t)(accel_data[0] << 8 | accel_data[1]);
-      int16_t ay_raw = (int16_t)(accel_data[2] << 8 | accel_data[3]);
-      int16_t az_raw = (int16_t)(accel_data[4] << 8 | accel_data[5]);
-      float ax = ax_raw / 16384.0f;
-      float ay = ay_raw / 16384.0f;
-      float az = az_raw / 16384.0f;
+      IMU_Wake();
 
-      // Read gyroscope
-      uint8_t gyro_data[6];
-      HAL_I2C_Mem_Read(&hi2c1, mpu_addr, 0x43, 1, gyro_data, 6, 100);
-      int16_t gx_raw = (int16_t)(gyro_data[0] << 8 | gyro_data[1]);
-      int16_t gy_raw = (int16_t)(gyro_data[2] << 8 | gyro_data[3]);
-      int16_t gz_raw = (int16_t)(gyro_data[4] << 8 | gyro_data[5]);
-      float gx = gx_raw / 131.0f;
-      float gy = gy_raw / 131.0f;
-      float gz = gz_raw / 131.0f;
+      // TODO: GPS_Wake();
+      // TODO: SD_OpenSession(session_number);
 
-      // Read magnetometer
-      uint8_t mag_data[6];
-      int16_t mx_raw = 0, my_raw = 0, mz_raw = 0;
-      if(HAL_I2C_Mem_Read(&hi2c1, mag_addr, 0x03, 1, mag_data, 6, 100) == HAL_OK) {
-        mx_raw = (int16_t)(mag_data[0] << 8 | mag_data[1]);
-        mz_raw = (int16_t)(mag_data[2] << 8 | mag_data[3]);
-        my_raw = (int16_t)(mag_data[4] << 8 | mag_data[5]);
+      /* ── RECORD FOR 30 MINUTES AT 100 Hz ──────────────────────────── */
+      uint32_t session_start = HAL_GetTick();
+      uint32_t samples_written = 0;
+
+      while (HAL_GetTick() - session_start < IMU_SESSION_MS)
+      {
+          GPIOB->BSRR = GPIO_PIN_7;  // Blue LED ON during sampling
+
+          // Non-blocking tick - reads sensors when 100 Hz deadline reached
+          IMU_Tick();
+
+          // Check if batch is ready (every 100 samples)
+          if (imu_batch_ready)
+          {
+              // TODO: Write to SD card
+              // SD_WriteIMUBatch(imu_batch, imu_batch_count);
+
+              samples_written += imu_batch_count;
+              IMU_ClearBatch();
+
+              GPIOB->BSRR = GPIO_PIN_7 << 16;  // Blue LED OFF after write
+          }
       }
 
-      // Print all sensor data
-      char buf[200];
-      sprintf(buf, "Accel: X=%+.2fg Y=%+.2fg Z=%+.2fg | Gyro: X=%+6.1f Y=%+6.1f Z=%+6.1f °/s | Mag: X=%+5d Y=%+5d Z=%+5d\r\n",
-              ax, ay, az, gx, gy, gz, mx_raw, my_raw, mz_raw);
-      print_msg(buf);
+      /* ── END SESSION ──────────────────────────────────────────────────── */
+      char end_msg[80];
+      snprintf(end_msg, sizeof(end_msg),
+          "[MAIN] Session %u complete. %lu samples recorded.\r\n",
+          session_number, (unsigned long)samples_written);
+      print_msg(end_msg);
 
-      GPIOB->BSRR = GPIO_PIN_7 << 16;  // Blue LED OFF
+      IMU_Sleep();
+      // TODO: GPS_Sleep();
+      // TODO: SD_CloseSession();
 
-      HAL_Delay(500);
+      /* ── WAIT 23.5 HOURS UNTIL NEXT SESSION ────────────────────────── */
+      uint32_t elapsed = HAL_GetTick() - session_start;
+      uint32_t wait_time = 0;
+
+      if (IMU_SESSION_INTERVAL_MS > elapsed)
+      {
+          wait_time = IMU_SESSION_INTERVAL_MS - elapsed;
+      }
+
+      char wait_msg[70];
+      snprintf(wait_msg, sizeof(wait_msg),
+          "[MAIN] Sleeping for %.1f hours until next session.\r\n\r\n",
+          (float)wait_time / 3600000.0f);
+      print_msg(wait_msg);
+
+      HAL_Delay(wait_time);  // Wait remainder of 24 hours
     }
 
     /* USER CODE END SysInit */

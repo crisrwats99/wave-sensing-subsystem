@@ -5,8 +5,8 @@
 ../Core/Src/imu.c:147:13:filter_update	48	static
 ../Core/Src/imu.c:166:14:read_magnetometer	40	static
 ../Core/Src/imu.c:200:9:IMU_Init	16	static
-../Core/Src/imu.c:245:9:IMU_Calibrate	280	static
-../Core/Src/imu.c:287:6:IMU_Sleep	8	static
-../Core/Src/imu.c:299:6:IMU_Wake	8	static
-../Core/Src/imu.c:318:6:IMU_Tick	408	static
-../Core/Src/imu.c:383:6:IMU_ClearBatch	4	static
+../Core/Src/imu.c:247:9:IMU_Calibrate	280	static
+../Core/Src/imu.c:289:6:IMU_Sleep	8	static
+../Core/Src/imu.c:301:6:IMU_Wake	8	static
+../Core/Src/imu.c:320:6:IMU_Tick	408	static
+../Core/Src/imu.c:385:6:IMU_ClearBatch	4	static
