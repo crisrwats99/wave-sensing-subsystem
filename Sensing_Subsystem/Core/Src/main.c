@@ -2,7 +2,7 @@
 /**
   ******************************************************************************
   * @file          : main.c
-  * @brief         : Main program body - IMU Test
+  * @brief         : Main program body - IMU + GPS + SD Card Integration
   * PROJECT        : EEE4113F Group 23 — Wave Direction, 2026
   * Author         : Batsirai Chris Rwatirera
   * BOARD          : STM32 NUCLEO-L4R5ZI-P
@@ -32,6 +32,8 @@
 #include <string.h>
 #include <stdio.h>
 #include "imu.h"
+#include "gps.h"
+#include "storage.h"  /* ← NEW: SD card module */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -53,6 +55,7 @@
 
 /* USER CODE BEGIN PV */
 extern UART_HandleTypeDef hlpuart1;
+extern UART_HandleTypeDef huart2;
 extern I2C_HandleTypeDef hi2c1;
 /* USER CODE END PV */
 
@@ -114,7 +117,10 @@ int main(void)
     // Initialize peripherals
     MX_GPIO_Init();
     MX_LPUART1_UART_Init();
+    MX_USART2_UART_Init();
     MX_I2C1_Init();
+    MX_SPI1_Init();       /* ← NEW: SPI for SD card */
+    MX_FATFS_Init();      /* ← NEW: FatFs middleware */
 
     // Helper function to print messages
     void print_msg(const char* msg) {
@@ -124,20 +130,26 @@ int main(void)
     // Print startup banner
     print_msg("\r\n========================================\r\n");
     print_msg("  EEE4113F Group 23 — Wave Direction\r\n");
+    print_msg("  IMU + GPS + SD Card Integration\r\n");
     print_msg("=========================================\r\n");
 
-    char cfg[200];
+    char cfg[300];
     snprintf(cfg, sizeof(cfg),
-        "  Sample rate : %d Hz\r\n"
-        "  Session     : %d min  (%lu samples)\r\n"
+        "  IMU rate    : %d Hz\r\n"
+        "  GPS rate    : %d Hz\r\n"
+        "  Session     : %d min  (%lu IMU samples)\r\n"
         "  Interval    : %d hours\r\n"
-        "  Batch write : every %d samples\r\n"
+        "  IMU batch   : every %d samples (1s)\r\n"
+        "  GPS batch   : every %d samples (10s)\r\n"
+        "  SD card     : SPI mode, power-loss safe\r\n"
         "=========================================\r\n",
         IMU_SAMPLE_RATE_HZ,
+        GPS_SAMPLE_RATE_HZ,
         IMU_SESSION_DURATION_MIN,
         (unsigned long)IMU_SAMPLES_PER_SESSION,
         IMU_SESSION_INTERVAL_HOURS,
-        IMU_BATCH_SIZE);
+        IMU_BATCH_SIZE,
+        GPS_BATCH_SIZE);
     print_msg(cfg);
 
     /* ── ONE-TIME STARTUP INITIALISATION ───────────────────────────────── */
@@ -168,6 +180,28 @@ int main(void)
         }
     }
 
+    // Initialize GPS module
+    print_msg("[MAIN] Initialising GPS...\r\n");
+    if (!GPS_Init())
+    {
+        print_msg("[MAIN] GPS init FAILED. Continuing without GPS.\r\n");
+        /* Note: GPS hardware issue known - continue with IMU-only logging */
+    }
+
+    // ★ NEW: Initialize SD card ★
+    print_msg("[MAIN] Initialising SD card...\r\n");
+    if (!Storage_Init())
+    {
+        print_msg("[MAIN] SD card init FAILED. Halting.\r\n");
+        print_msg("[MAIN] Check: Card inserted? FAT32 formatted? SPI wiring?\r\n");
+        while(1) {
+          GPIOB->BSRR = GPIO_PIN_14;  // Red LED blink = error
+          HAL_Delay(300);
+          GPIOB->BSRR = GPIO_PIN_14 << 16;
+          HAL_Delay(300);
+        }
+    }
+
     print_msg("[MAIN] All modules ready. Starting session loop.\r\n\r\n");
 
     GPIOC->BSRR = GPIO_PIN_7;  // Green LED ON = initialization complete
@@ -180,51 +214,86 @@ int main(void)
     {
       /* ── START SESSION ───────────────────────────────────────────────── */
       session_number++;
-      char sess_msg[80];
+      char sess_msg[120];
       snprintf(sess_msg, sizeof(sess_msg),
-          "[MAIN] Session %u starting (%d min @ %d Hz)\r\n",
-          session_number, IMU_SESSION_DURATION_MIN, IMU_SAMPLE_RATE_HZ);
+          "[MAIN] Session %u starting (30 min: IMU @ %d Hz, GPS @ %d Hz)\r\n",
+          session_number, IMU_SAMPLE_RATE_HZ, GPS_SAMPLE_RATE_HZ);
       print_msg(sess_msg);
 
       IMU_Wake();
+      GPS_Wake();
 
-      // TODO: GPS_Wake();
-      // TODO: SD_OpenSession(session_number);
+      // ★ NEW: Open session files on SD card ★
+      if (!Storage_OpenSession(session_number))
+      {
+          print_msg("[MAIN] ERROR: Could not open SD session. Halting.\r\n");
+          while(1) {
+            GPIOB->BSRR = GPIO_PIN_14;  // Red LED blink = error
+            HAL_Delay(500);
+            GPIOB->BSRR = GPIO_PIN_14 << 16;
+            HAL_Delay(500);
+          }
+      }
 
-      /* ── RECORD FOR 30 MINUTES AT 100 Hz ──────────────────────────── */
+      /* ── RECORD FOR 30 MINUTES ──────────────────────────────────────── */
       uint32_t session_start = HAL_GetTick();
-      uint32_t samples_written = 0;
+      uint32_t imu_samples_written = 0;
+      uint32_t gps_samples_written = 0;
 
       while (HAL_GetTick() - session_start < IMU_SESSION_MS)
       {
           GPIOB->BSRR = GPIO_PIN_7;  // Blue LED ON during sampling
 
-          // Non-blocking tick - reads sensors when 100 Hz deadline reached
+          // Non-blocking ticks for both sensors
           IMU_Tick();
+          GPS_Tick();
 
-          // Check if batch is ready (every 100 samples)
+          // ★ Check if IMU batch is ready (every 100 samples = 1 second) ★
           if (imu_batch_ready)
           {
-              // TODO: Write to SD card
-              // SD_WriteIMUBatch(imu_batch, imu_batch_count);
+              // Write to SD card (includes f_sync for power-loss safety)
+              if (!Storage_WriteIMUBatch(imu_batch, imu_batch_count))
+              {
+                  print_msg("[MAIN] ERROR: IMU write failed!\r\n");
+                  /* Could halt here, or continue logging */
+              }
 
-              samples_written += imu_batch_count;
+              imu_samples_written += imu_batch_count;
               IMU_ClearBatch();
 
               GPIOB->BSRR = GPIO_PIN_7 << 16;  // Blue LED OFF after write
           }
+
+          // ★ Check if GPS batch is ready (every 80 samples = 10 seconds) ★
+          if (gps_batch_ready)
+          {
+              // Write to SD card (includes f_sync for power-loss safety)
+              if (!Storage_WriteGPSBatch(gps_batch, gps_batch_count))
+              {
+                  print_msg("[MAIN] ERROR: GPS write failed!\r\n");
+                  /* Could halt here, or continue logging */
+              }
+
+              gps_samples_written += gps_batch_count;
+              GPS_ClearBatch();
+          }
       }
 
       /* ── END SESSION ──────────────────────────────────────────────────── */
-      char end_msg[80];
+      char end_msg[120];
       snprintf(end_msg, sizeof(end_msg),
-          "[MAIN] Session %u complete. %lu samples recorded.\r\n",
-          session_number, (unsigned long)samples_written);
+          "[MAIN] Session %u complete.\r\n"
+          "       IMU: %lu samples | GPS: %lu samples\r\n",
+          session_number,
+          (unsigned long)imu_samples_written,
+          (unsigned long)gps_samples_written);
       print_msg(end_msg);
 
       IMU_Sleep();
-      // TODO: GPS_Sleep();
-      // TODO: SD_CloseSession();
+      GPS_Sleep();
+
+      // ★ NEW: Close session files (final sync happens here) ★
+      Storage_CloseSession();
 
       /* ── WAIT 23.5 HOURS UNTIL NEXT SESSION ────────────────────────── */
       uint32_t elapsed = HAL_GetTick() - session_start;

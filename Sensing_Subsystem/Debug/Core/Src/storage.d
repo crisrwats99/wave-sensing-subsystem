@@ -1,4 +1,4 @@
-Core/Src/sd_card.o: ../Core/Src/sd_card.c ../Core/Inc/sd_card.h \
+Core/Src/storage.o: ../Core/Src/storage.c ../Core/Inc/storage.h \
  ../Core/Inc/imu.h ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal.h \
  ../Core/Inc/stm32l4xx_hal_conf.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_rcc.h \
@@ -53,7 +53,7 @@ Core/Src/sd_card.o: ../Core/Src/sd_card.c ../Core/Inc/sd_card.h \
  ../Core/Inc/main.h ../Middlewares/Third_Party/FatFs/src/ff_gen_drv.h \
  ../Middlewares/Third_Party/FatFs/src/diskio.h \
  ../Middlewares/Third_Party/FatFs/src/ff.h ../FATFS/Target/user_diskio.h
-../Core/Inc/sd_card.h:
+../Core/Inc/storage.h:
 ../Core/Inc/imu.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal.h:
 ../Core/Inc/stm32l4xx_hal_conf.h:

@@ -20,7 +20,7 @@
 #define GPS_PERIOD_MS           (1000 / GPS_SAMPLE_RATE_HZ)
 #define GPS_BATCH_SIZE          80     /* 10 seconds worth at 8 Hz           */
 
-#define GPS_DEBUG_PRINT         0      /* 1 = print to serial every 1s       */
+#define GPS_DEBUG_PRINT         1      /* 1 = print to serial every 1s       */
 
 
 /* ─────────────────────────────────────────────────────────────────────────────

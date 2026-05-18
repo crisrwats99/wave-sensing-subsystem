@@ -89,7 +89,6 @@ static uint32_t last_debug_ms = 0;
 extern I2C_HandleTypeDef  hi2c1;
 extern UART_HandleTypeDef hlpuart1;
 
-
 /* ─────────────────────────────────────────────────────────────────────────────
  * TINY HELPERS  (keep the main functions readable)
  * ─────────────────────────────────────────────────────────────────────────────

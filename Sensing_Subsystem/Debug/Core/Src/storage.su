@@ -1,0 +1,7 @@
+../Core/Src/storage.c:24:13:dbg	16	static
+../Core/Src/storage.c:30:9:Storage_Init	112	static
+../Core/Src/storage.c:64:9:Storage_OpenSession	40	static
+../Core/Src/storage.c:177:9:Storage_WriteIMUBatch	520	static
+../Core/Src/storage.c:238:9:Storage_WriteGPSBatch	264	static
+../Core/Src/storage.c:286:9:Storage_CloseSession	16	static
+../Core/Src/storage.c:307:13:Storage_GetStatus	4	static

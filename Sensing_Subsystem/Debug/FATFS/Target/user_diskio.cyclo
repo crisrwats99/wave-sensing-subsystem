@@ -1,5 +1,10 @@
-../FATFS/Target/user_diskio.c:79:9:USER_initialize	1
-../FATFS/Target/user_diskio.c:94:9:USER_status	1
-../FATFS/Target/user_diskio.c:112:9:USER_read	1
-../FATFS/Target/user_diskio.c:133:9:USER_write	1
-../FATFS/Target/user_diskio.c:155:9:USER_ioctl	1
+../FATFS/Target/user_diskio.c:50:16:SPI_TxRx	1
+../FATFS/Target/user_diskio.c:58:16:SD_WaitReady	3
+../FATFS/Target/user_diskio.c:70:13:SD_Deselect	1
+../FATFS/Target/user_diskio.c:77:16:SD_Select	2
+../FATFS/Target/user_diskio.c:87:16:SD_SendCmd	10
+../FATFS/Target/user_diskio.c:129:9:USER_initialize	20
+../FATFS/Target/user_diskio.c:187:9:USER_status	2
+../FATFS/Target/user_diskio.c:194:9:USER_read	17
+../FATFS/Target/user_diskio.c:250:9:USER_write	17
+../FATFS/Target/user_diskio.c:311:9:USER_ioctl	8

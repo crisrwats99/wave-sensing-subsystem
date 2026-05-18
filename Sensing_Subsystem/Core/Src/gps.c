@@ -1,9 +1,10 @@
 /* =============================================================================
  * FILE     : gps.c
  * BOARD    : STM32 NUCLEO-L4R5ZI-P
- * MODULE   : TEL0132 GPS (AT6558 chip) via LPUART1 at 9600 baud
+ * MODULE   : TEL0132 GPS (AT6558 chip) via USART2 at 9600 baud
  * Author   : Batsirai Chris Rwatirera
  *
+ * CORRECTED: Debug prints to LPUART1, GPS data from USART2
  * =============================================================================
  */
 
@@ -56,16 +57,17 @@ static uint32_t last_debug_ms = 0;
 #endif
 
 /* HAL handles from main.c */
-extern UART_HandleTypeDef huart2;  /* GPS connected to USART2 */
+extern UART_HandleTypeDef hlpuart1;  /* Debug serial - 115200 baud */
+extern UART_HandleTypeDef huart2;    /* GPS UART - 9600 baud */
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * DEBUG PRINT (same as IMU)
+ * DEBUG PRINT - sends to LPUART1 (debug serial), NOT GPS UART
  * ─────────────────────────────────────────────────────────────────────────────
  */
 static void dbg(const char *msg)
 {
-    HAL_UART_Transmit(&huart2, (uint8_t *)msg, (uint16_t)strlen(msg), HAL_MAX_DELAY);
+    HAL_UART_Transmit(&hlpuart1, (uint8_t *)msg, (uint16_t)strlen(msg), HAL_MAX_DELAY);
 }
 
 
@@ -167,6 +169,30 @@ uint8_t GPS_Init(void)
  *   - Set batch_ready when full
  * =============================================================================
  */
+
+/* ═══════════════════════════════════════════════════════════════════
+ * TEST FUNCTION: Direct UART read without interrupts
+ * ═══════════════════════════════════════════════════════════════════ */
+void GPS_DirectTest(void)
+{
+    dbg("[GPS TEST] Reading UART directly for 10 seconds...\r\n");
+
+    uint32_t start = HAL_GetTick();
+    uint8_t byte;
+    uint16_t count = 0;
+
+    while (HAL_GetTick() - start < 10000) {  // 10 seconds
+        if (HAL_UART_Receive(&huart2, &byte, 1, 100) == HAL_OK) {
+            HAL_UART_Transmit(&hlpuart1, &byte, 1, 10);  // Echo to debug
+            count++;
+        }
+    }
+
+    char msg[60];
+    snprintf(msg, sizeof(msg), "[GPS TEST] Received %u bytes in 10 seconds\r\n", count);
+    dbg(msg);
+}
+
 void GPS_Tick(void)
 {
     /* Don't sample if batch is full and waiting for SD write */
@@ -179,9 +205,35 @@ void GPS_Tick(void)
         tick_started = 1;
     }
     
+    /* ═══════════════════════════════════════════════════════════════
+     * DEBUG 1: Show buffer activity every 5 seconds
+     * ═══════════════════════════════════════════════════════════════ */
+    #if GPS_DEBUG_PRINT
+    static uint32_t last_buf_check = 0;
+    if (HAL_GetTick() - last_buf_check >= 5000) {
+        last_buf_check = HAL_GetTick();
+        uint16_t bytes_in_buffer = (rx_write >= rx_read) ?
+                                    (rx_write - rx_read) :
+                                    (RX_BUF_SIZE - rx_read + rx_write);
+        char buf[80];
+        snprintf(buf, sizeof(buf),
+                "[GPS] Buffer: %u bytes | rx_write=%u rx_read=%u\r\n",
+                bytes_in_buffer, rx_write, rx_read);
+        dbg(buf);
+    }
+    #endif
+
     /* Process incoming NMEA data while waiting for next sample time */
     if (get_line())
     {
+        /* ═══════════════════════════════════════════════════════════
+         * DEBUG 2: Show raw NMEA sentences
+         * ═══════════════════════════════════════════════════════════ */
+        #if GPS_DEBUG_PRINT
+        dbg("[NMEA] ");
+        dbg(line);
+        #endif
+
         /* Parse RMC sentence (has time, position, speed) */
         if (minmea_sentence_id(line, false) == MINMEA_SENTENCE_RMC)
         {
@@ -239,7 +291,6 @@ void GPS_Tick(void)
 #endif
 }
 
-
 /* =============================================================================
  * GPS_ClearBatch - called by main after SD write finishes
  * =============================================================================
@@ -253,7 +304,7 @@ void GPS_ClearBatch(void)
 
 /* =============================================================================
  * GPS_Sleep - power down GPS module
- * No specific sleep mode
+ * No specific sleep mode implemented yet
  * We just stop sampling. Module stays on but draws less power when idle.
  * =============================================================================
  */
