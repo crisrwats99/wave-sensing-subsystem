@@ -1,5 +1,13 @@
 /* =============================================================================
- * FILE     : storage.c (ROBUST VERSION WITH RETRY)
+ * FILE     : storage.c
+ * BOARD    : STM32 NUCLEO-L4R5ZI-P
+ * MODULE   : SD Card logging via SPI + FatFs
+ * Author   : Batsirai Chris Rwatirera
+ *
+ * PURPOSE  : Log IMU and GPS batch data to SD card in CSV format
+ *            **POWER-LOSS RESILIENT** via f_sync() after every write
+ *
+ * UPDATED  : Cleaned up for working SD driver (slow SPI, no workarounds needed)
  * =============================================================================
  */
 
@@ -9,6 +17,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* ─────────────────────────────────────────────────────────────────────────────
+ * PRIVATE STATE
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 static FATFS   fs;
 static FIL     imu_file;
 static FIL     gps_file;
@@ -26,7 +38,11 @@ static void dbg(const char *msg)
     HAL_UART_Transmit(&hlpuart1, (uint8_t *)msg, (uint16_t)strlen(msg), HAL_MAX_DELAY);
 }
 
-/* Retry SD card init up to 3 times */
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Storage_Init - Mount SD card filesystem
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 uint8_t Storage_Init(void)
 {
     FRESULT fres;
@@ -34,16 +50,7 @@ uint8_t Storage_Init(void)
 
     dbg("\r\n[STOR] Initializing SD card...\r\n");
 
-    /* Power cycle SD card (toggle CS pin) */
-    dbg("[STOR] Power-on reset sequence (5s)...\r\n");
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);   // CS high
-    HAL_Delay(1000);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET); // CS low
-    HAL_Delay(1000);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);   // CS high
-    HAL_Delay(5000);  // Let card stabilize for 5 seconds
-
-    /* Mount filesystem */
+    /* Mount filesystem - the slow SPI speed (125 kHz) handles all timing */
     dbg("[STOR] Attempting mount...\r\n");
     fres = f_mount(&fs, "0:", 1);
 
@@ -56,11 +63,14 @@ uint8_t Storage_Init(void)
     dbg("[STOR] Filesystem mounted.\r\n");
     fs_mounted = 1;
 
-    dbg("[STOR] Card ready. Proceeding to session files.\r\n\r\n");
-
     return 1;
 }
 
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Storage_OpenSession - Create new session files with headers
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 uint8_t Storage_OpenSession(uint16_t session_num)
 {
     FRESULT fres;
@@ -82,26 +92,11 @@ uint8_t Storage_OpenSession(uint16_t session_num)
              "[STOR] Opening session %u...\r\n", session_num);
     dbg(status_msg);
 
-    /* CRITICAL FIX: Remount filesystem to clear any stale state */
-    dbg("[STOR] Remounting filesystem...\r\n");
-    f_mount(NULL, "0:", 0);  /* Unmount */
-    HAL_Delay(100);
-    fres = f_mount(&fs, "0:", 1);  /* Remount */
-
-    if (fres != FR_OK) {
-        snprintf(status_msg, sizeof(status_msg),
-                 "[STOR] ERROR: Remount failed (code %d)\r\n", fres);
-        dbg(status_msg);
-        return 0;
-    }
-
-    dbg("[STOR] Remount OK. Creating files...\r\n");
-    HAL_Delay(500);  /* Give card time to stabilize */
-
+    /* Build file paths */
     snprintf(imu_path, sizeof(imu_path), "0:S%03u_IMU.CSV", session_num);
     snprintf(gps_path, sizeof(gps_path), "0:S%03u_GPS.CSV", session_num);
 
-    /* Open IMU file */
+    /* ── CREATE IMU FILE ────────────────────────────────────────────────── */
     fres = f_open(&imu_file, imu_path, FA_CREATE_ALWAYS | FA_WRITE);
     if (fres != FR_OK)
     {
@@ -111,14 +106,11 @@ uint8_t Storage_OpenSession(uint16_t session_num)
         return 0;
     }
 
+    /* Write IMU header */
     const char *imu_header =
         "timestamp_ms,ax,ay,az,gx,gy,gz,mx,my,mz,heading_deg,roll_deg,pitch_deg\r\n";
 
-    /* Wait before writing IMU header */
-    HAL_Delay(500);
-
     fres = f_write(&imu_file, imu_header, strlen(imu_header), &bytes_written);
-
     if (fres != FR_OK || bytes_written != strlen(imu_header))
     {
         snprintf(status_msg, sizeof(status_msg),
@@ -134,11 +126,7 @@ uint8_t Storage_OpenSession(uint16_t session_num)
     snprintf(status_msg, sizeof(status_msg), "[STOR] Created %s\r\n", imu_path);
     dbg(status_msg);
 
-    /* CRITICAL: Wait longer before opening GPS file */
-    dbg("[STOR] Waiting before GPS file (3s)...\r\n");
-    HAL_Delay(3000);
-
-    /* Open GPS file */
+    /* ── CREATE GPS FILE ────────────────────────────────────────────────── */
     fres = f_open(&gps_file, gps_path, FA_CREATE_ALWAYS | FA_WRITE);
     if (fres != FR_OK)
     {
@@ -149,16 +137,17 @@ uint8_t Storage_OpenSession(uint16_t session_num)
         return 0;
     }
 
-    /* Wait before writing GPS header */
-    HAL_Delay(500);
-
+    /* Write GPS header */
     const char *gps_header =
         "timestamp_ms,valid,utc_h,utc_m,utc_s,lat_deg,lon_deg,speed_knots\r\n";
-    fres = f_write(&gps_file, gps_header, strlen(gps_header), &bytes_written);
 
-    if (fres != FR_OK)
+    fres = f_write(&gps_file, gps_header, strlen(gps_header), &bytes_written);
+    if (fres != FR_OK || bytes_written != strlen(gps_header))
     {
-        dbg("[STOR] ERROR: Failed to write GPS header.\r\n");
+        snprintf(status_msg, sizeof(status_msg),
+                 "[STOR] ERROR: GPS header write failed (code %d, wrote %u bytes)\r\n",
+                 fres, bytes_written);
+        dbg(status_msg);
         f_close(&imu_file);
         f_close(&gps_file);
         return 0;
@@ -174,21 +163,22 @@ uint8_t Storage_OpenSession(uint16_t session_num)
     return 1;
 }
 
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Storage_WriteIMUBatch - Write 100 IMU samples to SD card
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 uint8_t Storage_WriteIMUBatch(IMU_Sample_t *batch, uint16_t count)
 {
     if (batch == NULL || count == 0 || !session_open) return 0;
 
     FRESULT fres;
     UINT bytes_written;
-    char debug_msg[100];
 
-    /* CRITICAL: Give SD card time to be ready (your card is SLOW) */
-    HAL_Delay(500);
-
-    /* Build entire batch as single string (much faster!) */
+    /* Build entire batch as single string */
     static char batch_buffer[20000];  /* ~200 bytes per line × 100 lines */
     char line[200];
-    batch_buffer[0] = '\0';  /* Clear buffer */
+    batch_buffer[0] = '\0';
 
     for (uint16_t i = 0; i < count; i++)
     {
@@ -207,34 +197,28 @@ uint8_t Storage_WriteIMUBatch(IMU_Sample_t *batch, uint16_t count)
 
     /* Write entire batch in ONE operation */
     fres = f_write(&imu_file, batch_buffer, strlen(batch_buffer), &bytes_written);
-
     if (fres != FR_OK) {
-        snprintf(debug_msg, sizeof(debug_msg), "[IMU_WRITE] Write failed: code %d\r\n", fres);
-        dbg(debug_msg);
         return 0;
     }
 
     if (bytes_written != strlen(batch_buffer)) {
-        snprintf(debug_msg, sizeof(debug_msg), "[IMU_WRITE] Partial write: %u/%u bytes\r\n",
-                 bytes_written, (unsigned)strlen(batch_buffer));
-        dbg(debug_msg);
         return 0;
     }
 
-    /* POWER-LOSS PROTECTION */
+    /* POWER-LOSS PROTECTION: sync after every batch */
     fres = f_sync(&imu_file);
     if (fres != FR_OK) {
-        snprintf(debug_msg, sizeof(debug_msg), "[IMU_WRITE] Sync failed: code %d\r\n", fres);
-        dbg(debug_msg);
         return 0;
     }
-
-    /* Give SD card time to finish sync before next operation */
-    HAL_Delay(500);
 
     return 1;
 }
 
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Storage_WriteGPSBatch - Write 80 GPS samples to SD card
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 uint8_t Storage_WriteGPSBatch(GPS_Sample_t *batch, uint16_t count)
 {
     if (batch == NULL || count == 0 || !session_open) return 0;
@@ -242,13 +226,10 @@ uint8_t Storage_WriteGPSBatch(GPS_Sample_t *batch, uint16_t count)
     FRESULT fres;
     UINT bytes_written;
 
-    /* CRITICAL: Give SD card time to be ready */
-    HAL_Delay(500);
-
     /* Build entire batch as single string */
     static char batch_buffer[12000];  /* ~150 bytes per line × 80 lines */
     char line[150];
-    batch_buffer[0] = '\0';  /* Clear buffer */
+    batch_buffer[0] = '\0';
 
     for (uint16_t i = 0; i < count; i++)
     {
@@ -267,28 +248,31 @@ uint8_t Storage_WriteGPSBatch(GPS_Sample_t *batch, uint16_t count)
 
     /* Write entire batch in ONE operation */
     fres = f_write(&gps_file, batch_buffer, strlen(batch_buffer), &bytes_written);
-
-    if (fres != FR_OK || bytes_written != strlen(batch_buffer))
-    {
+    if (fres != FR_OK || bytes_written != strlen(batch_buffer)) {
         return 0;
     }
 
-    /* POWER-LOSS PROTECTION */
+    /* POWER-LOSS PROTECTION: sync after every batch */
     fres = f_sync(&gps_file);
-    if (fres != FR_OK) return 0;
-
-    /* Give SD card time to finish sync */
-    HAL_Delay(500);
+    if (fres != FR_OK) {
+        return 0;
+    }
 
     return 1;
 }
 
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Storage_CloseSession - Close files at end of recording session
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 uint8_t Storage_CloseSession(void)
 {
     if (!session_open) return 1;
 
     dbg("[STOR] Closing session files...\r\n");
 
+    /* Final sync before closing */
     f_sync(&imu_file);
     f_sync(&gps_file);
 
@@ -304,6 +288,11 @@ uint8_t Storage_CloseSession(void)
     return 1;
 }
 
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Storage_GetStatus - For debugging
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 const char* Storage_GetStatus(void)
 {
     if (!fs_mounted)

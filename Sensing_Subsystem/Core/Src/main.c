@@ -9,7 +9,6 @@
   ******************************************************************************
   */
 /* USER CODE END Header */
-
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
@@ -25,15 +24,13 @@
 #include "usb_otg.h"
 #include "gpio.h"
 
-
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdio.h>
 #include "imu.h"
 #include "gps.h"
-#include "storage.h"  /* ← NEW: SD card module */
+#include "storage.h"  /* �? NEW: SD card module */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -68,6 +65,177 @@ void PeriphCommonClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * SD CARD SPI FUNCTIONS
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+
+static uint8_t sd_spi_txrx(uint8_t data)
+{
+    uint8_t rx = 0xFF;
+    HAL_SPI_TransmitReceive(&hspi1, &data, &rx, 1, HAL_MAX_DELAY);
+    return rx;
+}
+
+static void sd_cs_high(void)
+{
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);  // CS = PA4
+    sd_spi_txrx(0xFF);
+}
+
+static void sd_cs_low(void)
+{
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);  // CS = PA4
+    sd_spi_txrx(0xFF);
+}
+
+static void sd_send_dummy_clocks(void)
+{
+    sd_cs_high();
+    for (int i = 0; i < 10; i++) {
+        sd_spi_txrx(0xFF);
+    }
+}
+
+static uint8_t sd_send_cmd(uint8_t cmd, uint32_t arg, uint8_t crc)
+{
+    uint8_t r1;
+
+    sd_cs_low();
+
+    sd_spi_txrx(0x40 | cmd);
+    sd_spi_txrx((uint8_t)(arg >> 24));
+    sd_spi_txrx((uint8_t)(arg >> 16));
+    sd_spi_txrx((uint8_t)(arg >> 8));
+    sd_spi_txrx((uint8_t)(arg));
+    sd_spi_txrx(crc);
+
+    for (int i = 0; i < 10; i++) {
+        r1 = sd_spi_txrx(0xFF);
+        if ((r1 & 0x80) == 0) {
+            return r1;
+        }
+    }
+
+    return 0xFF;
+}
+
+uint8_t sd_init(void)
+{
+    uint8_t r1;
+    uint8_t r7[4];
+
+    sd_send_dummy_clocks();
+
+    r1 = sd_send_cmd(0, 0x00000000, 0x95);
+    sd_cs_high();
+    if (r1 != 0x01) return 1;
+
+    r1 = sd_send_cmd(8, 0x000001AA, 0x87);
+    r7[0] = sd_spi_txrx(0xFF);
+    r7[1] = sd_spi_txrx(0xFF);
+    r7[2] = sd_spi_txrx(0xFF);
+    r7[3] = sd_spi_txrx(0xFF);
+    sd_cs_high();
+
+    if (r1 != 0x01 || r7[2] != 0x01 || r7[3] != 0xAA) return 2;
+
+    uint32_t timeout = 0;
+    do {
+        r1 = sd_send_cmd(55, 0x00000000, 0xFF);
+        sd_cs_high();
+        r1 = sd_send_cmd(41, 0x40000000, 0xFF);
+        sd_cs_high();
+        timeout++;
+        HAL_Delay(10);
+    } while ((r1 != 0x00) && (timeout < 500));
+
+    if (r1 != 0x00) return 3;
+
+    r1 = sd_send_cmd(58, 0x00000000, 0xFF);
+    sd_spi_txrx(0xFF);
+    sd_spi_txrx(0xFF);
+    sd_spi_txrx(0xFF);
+    sd_spi_txrx(0xFF);
+    sd_cs_high();
+
+    if (r1 != 0x00) return 4;
+
+    return 0;
+}
+
+uint8_t sd_read_block(uint32_t block_addr, uint8_t *buffer)
+{
+    uint8_t r1;
+    uint8_t token;
+
+    r1 = sd_send_cmd(17, block_addr, 0xFF);
+    if (r1 != 0x00) {
+        sd_cs_high();
+        return r1;
+    }
+
+    for (uint32_t i = 0; i < 100000; i++) {
+        token = sd_spi_txrx(0xFF);
+        if (token == 0xFE) break;
+    }
+
+    if (token != 0xFE) {
+        sd_cs_high();
+        return 0xFE;
+    }
+
+    for (uint32_t i = 0; i < 512; i++) {
+        buffer[i] = sd_spi_txrx(0xFF);
+    }
+
+    sd_spi_txrx(0xFF);
+    sd_spi_txrx(0xFF);
+
+    sd_cs_high();
+    return 0x00;
+}
+
+uint8_t sd_write_block(uint32_t block_addr, const uint8_t *data)
+{
+    uint8_t r1;
+    uint8_t resp;
+    uint8_t dummy;
+
+    r1 = sd_send_cmd(24, block_addr, 0xFF);
+    if (r1 != 0x00) {
+        sd_cs_high();
+        return r1;
+    }
+
+    sd_spi_txrx(0xFF);
+    sd_spi_txrx(0xFE);
+
+    for (uint32_t i = 0; i < 512; i++) {
+        sd_spi_txrx(data[i]);
+    }
+
+    sd_spi_txrx(0xFF);
+    sd_spi_txrx(0xFF);
+
+    resp = sd_spi_txrx(0xFF);
+
+    if ((resp & 0x1F) != 0x05) {
+        sd_cs_high();
+        return resp;
+    }
+
+    uint32_t timeout = 1000000;
+    do {
+        dummy = sd_spi_txrx(0xFF);
+        timeout--;
+    } while ((dummy != 0xFF) && (timeout > 0));
+
+    sd_cs_high();
+
+    return (timeout == 0) ? 0xFE : 0x00;
+}
 
 /* USER CODE END 0 */
 
@@ -119,8 +287,8 @@ int main(void)
     MX_LPUART1_UART_Init();
     MX_USART2_UART_Init();
     MX_I2C1_Init();
-    MX_SPI1_Init();       /* ← NEW: SPI for SD card */
-    MX_FATFS_Init();      /* ← NEW: FatFs middleware */
+    MX_SPI1_Init();       /* �? NEW: SPI for SD card */
+    MX_FATFS_Init();      /* �? NEW: FatFs middleware */
 
     // Helper function to print messages
     void print_msg(const char* msg) {
@@ -313,7 +481,7 @@ int main(void)
       HAL_Delay(wait_time);  // Wait remainder of 24 hours
     }
 
-    /* USER CODE END SysInit */
+  /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
@@ -364,14 +532,21 @@ void SystemClock_Config(void)
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
+  /** Configure the main internal regulator output voltage
+  */
   if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
   {
     Error_Handler();
   }
 
+  /** Configure LSE Drive Capability
+  */
   HAL_PWR_EnableBkUpAccess();
   __HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_LOW);
 
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSE|RCC_OSCILLATORTYPE_MSI;
   RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.MSIState = RCC_MSI_ON;
@@ -389,6 +564,8 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
@@ -401,6 +578,8 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 
+  /** Enable MSI Auto calibration
+  */
   HAL_RCCEx_EnableMSIPLLMode();
 }
 
@@ -412,6 +591,8 @@ void PeriphCommonClock_Config(void)
 {
   RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
+  /** Initializes the peripherals clock
+  */
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_SAI1|RCC_PERIPHCLK_SAI2
                               |RCC_PERIPHCLK_USB|RCC_PERIPHCLK_ADC;
   PeriphClkInit.Sai1ClockSelection = RCC_SAI1CLKSOURCE_PLLSAI1;
@@ -455,6 +636,13 @@ void Error_Handler(void)
 }
 
 #ifdef  USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
